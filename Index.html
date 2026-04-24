@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galaxy Drifter+</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  canvas { display:block; margin:auto; }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="400" height="700"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let player, asteroids, stars, particles;
+let score, highscore, gameOver, speed, time;
+
+// SOUND
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playBeep(freq, duration) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.frequency.value = freq;
+  osc.start();
+  gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function collectSound() {
+  playBeep(900, 0.06);
+}
+
+function explosionSound() {
+  playBeep(60, 0.5);
+}
+
+// RESET
+function reset() {
+  player = { x: canvas.width/2, y: canvas.height - 120, size: 20 };
+  asteroids = [];
+  stars = [];
+  particles = [];
+
+  score = 0;
+  speed = 3;        // 🚀 schneller Start
+  time = 0;
+  gameOver = false;
+
+  highscore = localStorage.getItem("hs") || 0;
+
+  // ⭐ WENIGER Sterne = schwerer
+  for (let i=0;i<8;i++) {
+    stars.push({
+      x: Math.random()*canvas.width,
+      y: Math.random()*canvas.height,
+      collected: false
+    });
+  }
+}
+
+reset();
+
+// STEUERUNG
+document.addEventListener("keydown", e => {
+  if (audioCtx.state === "suspended") audioCtx.resume();
+
+  if (gameOver && (e.key === "r" || e.key === "R")) reset();
+
+  if (e.key === "ArrowLeft") player.x -= 30;
+  if (e.key === "ArrowRight") player.x += 30;
+  if (e.key === "ArrowUp") player.y -= 30;
+  if (e.key === "ArrowDown") player.y += 30;
+
+  playBeep(500, 0.02);
+});
+
+canvas.addEventListener("click", () => {
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (gameOver) reset();
+});
+
+// ASTEROID
+function spawnAsteroid() {
+  asteroids.push({
+    x: Math.random()*canvas.width,
+    y: -20,
+    size: 10 + Math.random()*25,
+    speed: 2 + Math.random()*3
+  });
+}
+
+// DIST
+function dist(a,b){
+  return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+// UPDATE
+function update() {
+  if (gameOver) return;
+
+  time++;
+
+  // 🚀 schneller werdendes Spiel
+  speed = 3 + time * 0.003;
+
+  // weniger Sterne → schwerer
+  if (stars.filter(s => !s.collected).length < 4) {
+    stars.push({
+      x: Math.random()*canvas.width,
+      y: -50,
+      collected: false
+    });
+  }
+
+  if (Math.random() < 0.04) spawnAsteroid();
+
+  // Sterne bewegen
+  stars.forEach(s => {
+    if (!s.collected) s.y += speed * 0.4;
+  });
+
+  // Asteroiden
+  asteroids.forEach(a => a.y += a.speed + speed);
+
+  // ⭐ SCORE SYSTEM
+  stars.forEach(s => {
+    if (!s.collected && dist(player,s) < 25) {
+      s.collected = true;
+
+      score += 25; // ⭐ mehr Punkte pro Stern
+      collectSound();
+
+      // kleine Effekte
+      for (let i=0;i<15;i++) {
+        particles.push({
+          x: s.x,
+          y: s.y,
+          vx: (Math.random()-0.5)*4,
+          vy: (Math.random()-0.5)*4,
+          life: 20,
+          color: "yellow"
+        });
+      }
+
+      setTimeout(() => {
+        s.x = Math.random()*canvas.width;
+        s.y = -100;
+        s.collected = false;
+      }, 1500);
+    }
+  });
+
+  // 🚀 ANTRIEB (dauerhafte Partikel)
+  particles.push({
+    x: player.x,
+    y: player.y + 18,
+    vx: (Math.random()-0.5)*1.5,
+    vy: Math.random()*2 + 1,
+    life: 25,
+    color: "orange"
+  });
+
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+  });
+
+  particles = particles.filter(p => p.life > 0);
+
+  // Kollision
+  asteroids.forEach(a => {
+    if (dist(player,a) < a.size + 15) {
+      gameOver = true;
+      explosionSound();
+
+      if (score > highscore) {
+        localStorage.setItem("hs", Math.floor(score));
+      }
+    }
+  });
+
+  player.x = Math.max(20, Math.min(canvas.width-20, player.x));
+  player.y = Math.max(20, Math.min(canvas.height-20, player.y));
+}
+
+// DRAW
+function draw() {
+  let g = ctx.createRadialGradient(200,350,50,200,350,400);
+  g.addColorStop(0, "#2a004d");
+  g.addColorStop(1, "#000000");
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Sterne
+  ctx.fillStyle = "yellow";
+  stars.forEach(s => {
+    if (!s.collected) {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 3, 0, Math.PI*2);
+      ctx.fill();
+    }
+  });
+
+  // Partikel
+  particles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, 3, 3);
+  });
+
+  // 🚀 Raumschiff
+  ctx.font = "28px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("🚀", player.x, player.y);
+
+  // Asteroiden
+  ctx.fillStyle = "gray";
+  asteroids.forEach(a => {
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, a.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // UI
+  ctx.fillStyle = "white";
+  ctx.font = "18px Arial";
+  ctx.fillText("Score: " + Math.floor(score), 10, 25);
+  ctx.fillText("Highscore: " + highscore, 10, 45);
+
+  if (gameOver) {
+    ctx.font = "30px Arial";
+    ctx.fillText("GAME OVER", 100, 350);
+    ctx.font = "16px Arial";
+    ctx.fillText("R oder Klick zum Neustart", 80, 380);
+  }
+}
+
+// LOOP
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
